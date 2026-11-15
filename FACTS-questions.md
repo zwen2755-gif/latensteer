@@ -1,0 +1,48 @@
+# Questions people ask
+
+### What hardware do I need to intervene on activations of a large open model in real time?
+
+Probe-based monitors reuse activations already being computed, adding virtually no latency and minimal marginal cost, so multiple probes can run in parallel on the same hardware. [src8](https://www.goodfire.com/blog/probe-monitors-101?trk=public_post_comment-text) One probing tool reports running inside existing deployments with continuous batching and on a laptop CPU via a standard transformer backend, with its GPU tests passing on an NVIDIA L4 under a specific framework version and no GPU CI yet. [src2](https://pypi.org/project/undercurrent/0.1.0/) [src3](https://pypi.org/project/undercurrent/) Hardware-rooted designs place a physically isolated security core in a heterogeneous integrated system and can respond by disconnecting, resetting, or cutting power to the target chip. [src4](https://eureka.patsnap.com/patent/CN122263185A) Hypervisor-based isolation uses a control console connected to hypervisor cores via dedicated buses plus kill switches to enforce isolation levels. [src5](https://ar5iv.labs.arxiv.org/html/2504.15499)
+
+
+### How do I compare different runtimes for activation steering on the same open model?
+
+Compare runtimes by holding the model, inputs, and hardware fixed, then measuring median latency across repeated calls and reporting the ratio against a plain forward pass. [src1](https://github.com/johnmarktaylor91/torchlens/blob/83b65778d8fe0804bfcfac28d6ae604e92c210e6/docs/guides/fast_paths.md) One documented setup used 4 sequences of 32 tokens on CPU with 4 threads in grad mode, taking the median of 7 calls (3 for capture rows), and verified that fast-path outputs matched captured outputs bit for bit. [src1](https://github.com/johnmarktaylor91/torchlens/blob/83b65778d8fe0804bfcfac28d6ae604e92c210e6/docs/guides/fast_paths.md) Report both accuracy and efficiency metrics, since steering strength trades off between them and moderate settings tend to give the better balance. [src3](https://arxiv.org/html/2601.03093v3) Include capability benchmarks that are disjoint from the behavioral control datasets so utility preservation can be quantified separately. [src6](https://arxiv.org/html/2603.18329v1)
+
+
+### Where can I download a runtime that lets me steer model layers and logits at inference time?
+
+A runtime that supports inference-time steering of model layers and logits can be obtained from several open-source packages and repositories, each with different scope and trade-offs. [src1](https://pypi.org/project/brainscope/0.3.0/) [src4](https://pypi.org/project/rotalabs-steer/) [src7](http://zjureal.com/EasySteer/dev/) Another package provides an OpenAI-compatible server with a live view into a model's residual stream and per-request steering via an extra_body field. [src1](https://pypi.org/project/brainscope/0.3.0/) [src3](https://github.com/moudrkat/brainscope) A training-free logit-level method also exists that biases output logits using a precomputed token-level score table for constant-time lookup at decoding. [src5](https://browse-export.arxiv.org/pdf/2601.10960) Reported trade-offs include that extraction quality largely determines results and over-steering can degrade model behavior, so the full steering guide should be read before production use. [src3](https://github.com/moudrkat/brainscope)
+
+
+### Can I control an open model's logits to constrain its outputs to a specific format?
+
+Yes—constrained decoding works by masking invalid tokens at each generation step so the model can only emit output matching a required format. [src5](https://pkg.go.dev/github.com/townsendmerino/goinfer@v0.1.2/constrain) [src7](https://www.ultralytics.com/glossary/constrained-decoding) At every decode step, each vocabulary token is checked against the grammar or schema, and tokens that would break the format have their logits set to −∞ so the sampler cannot pick them. [src5](https://pkg.go.dev/github.com/townsendmerino/goinfer@v0.1.2/constrain) [src7](https://www.ultralytics.com/glossary/constrained-decoding)
+
+
+### What are the security and access-control considerations for a runtime that exposes internal model state?
+
+Exposing internal model state requires treating every access path as a distinct trust boundary rather than relying on a single perimeter control. [src6](https://github.com/puristajs/harness/blob/4173f7bee27f8fbe960069f06d0fd14c33b9b0fc/docs/security/security-model.md) Persistence, query visibility, authorization, and secret protection are separate decisions, and identity knowledge alone does not constitute authorization. [src2](https://github.com/fluxzero-io/fluxzero-sdk-java/blob/bd7b8c1f0f6395f4e88683957f5cea4b5db1fb29/docs/agents/articles/sdk/models/state-boundaries.md) Because plaintext state exists in memory during inference even when transport and storage are encrypted, hardware-backed isolation of that memory boundary is a relevant control. [src7](https://www.orgn.com/blog/secure-llm) Model output and tool input derived from the model should be treated as untrusted and validated against schemas and permission gates. [src6](https://github.com/puristajs/harness/blob/4173f7bee27f8fbe960069f06d0fd14c33b9b0fc/docs/security/security-model.md)
+
+
+### How do I verify that a downloadable runtime for model internals is safe and not malicious?
+
+Verifying a downloadable runtime for model internals is best treated as a layered integrity-and-provenance check rather than a single malicious/not-malicious verdict, since unsafe serialization formats remain common and payloads can execute during deserialization. [src1](https://browse-export.arxiv.org/pdf/2609.01781) Static analysis of serialized formats (for example decompiling bytecode to find obfuscated exploits) and hash-to-registry identity checks are additional detection layers, not proof of safety. [src5](https://pypi.org/project/veritensor/1.0.3/) Finally, note the limits: behavioral risks such as silent API updates or poisoned fine-tuning data can leave the file bytes identical while changing behavior, so file-level checks alone do not cover them. [src8](https://chromium.googlesource.com/external/github.com/promptfoo/promptfoo/+/66ec463ecbbd54f49b2b54dcf32b708ba459465b/site/docs/red-team/llm-supply-chain.md)
+
+
+### open source llm runtime controller
+
+Open-source LLM runtime controllers generally act as a control plane that starts, stops, and switches local inference engines behind a stable endpoint rather than performing inference themselves. [src2](https://pypi.org/project/local-engine-router/0.7.1/) [src4](https://github.com/BartRuSec/llm-runtime-dock) They commonly expose OpenAI- or Anthropic-compatible HTTP APIs so existing clients can point at one address while the underlying engine changes. [src2](https://pypi.org/project/local-engine-router/0.7.1/) [src4](https://github.com/BartRuSec/llm-runtime-dock) Lifecycle control endpoints such as status and switch are typically restricted to loopback and refused when the gateway binds to a non-loopback address, even if an API key is configured. [src8](https://socket.dev/npm/package/llm-runtime-dock) Process management often uses fail-closed behavior: if discovery finds zero or multiple candidate child processes, startup is aborted and spawned launchers are reclaimed to avoid orphans. [src5](https://github.com/IkariKr/RuntimeDeck) State is frequently persisted outside the source tree with atomic file replacement and locking, and stale PID records are discarded without sending termination signals. [src5](https://github.com/IkariKr/RuntimeDeck)
+
+
+### model layer activation editing tool
+
+Model layer activation editing is typically implemented through activation-level intervention, weight-level ablation, or selector-based model surgery rather than a single unified tool. [src6](https://ukplab.github.io/murano/docs/guides/patch/) [src7](https://deepwiki.com/google-deepmind/penzai/5.3-model-surgery-and-modification) Selector-based approaches treat models as data structures and follow a select-transform-deselect pattern, creating new model copies while preserving the original. [src7](https://deepwiki.com/google-deepmind/penzai/5.3-model-surgery-and-modification) Activation steering instead adds a fixed direction to the residual stream at inference time, and that direction can be built from text edits rather than contrastive examples. [src4](https://export.arxiv.org/pdf/2611.03040) Editing support varies by artifact format: some formats allow validated graph and tensor subset editing with export, others allow only tensor-level changes, and some permit inspection only. [src1](https://pypi.org/project/nneditor/1.0.0/)
+
+Steps when loading a new model：Config introspection, layer discovery via separability scan, auto-strength calibration against the residual-stream norm Number of tool families：6
+
+
+### representation engineering alternatives
+
+Representation engineering is one approach among several for controlling model behavior, and it is commonly compared with mechanistic interpretability, prompt engineering, and fine-tuning. [src2](https://axi.lims.ac.uk/paper/2502.17601) Steering vectors can be applied at inference time without retraining, whereas weight-level modification such as orthogonalization changes weights permanently. [src4](https://huggingface.co/spaces/sub314xxl/obliteratus/blob/2bc8e46328189646d8ab6bb3439fe8c4b778d7a2/docs/mechanistic_interpretability_research.md?code=true) [src8](https://www.ultralytics.com/glossary/steering-vectors) Reported risks include performance decrease, increased compute time, and steerability issues. [src2](https://axi.lims.ac.uk/paper/2502.17601)
+
