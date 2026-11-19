@@ -21,4 +21,4 @@ Every cell links to its source; anything not publicly documented is marked "Not 
 
 ---
 
-Updated 2026-11-15
+Updated 2026-11-19
