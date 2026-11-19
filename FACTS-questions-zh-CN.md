@@ -11,35 +11,33 @@
 
 ### 这类方案对显存和算力的额外开销大概是多少？
 
-这类方案对显存和算力的额外开销因方法而异，总体呈现“省显存、付算力或带宽”的取舍关系。 [来源1](https://raw.githubusercontent.com/WalkingMeatAxolotl/AnimaLoraStudio/refs/heads/master/docs/design/block-swap.md) [来源7](https://github.com/mindspore-ai/docs/blob/a406bad67b93856c2cc9e8ebd71bf9f4fbc04e0f/docs/mindformers/docs/source_zh_cn/feature/memory_optimization.md) 激活值交换则以 PCIe 带宽和延迟换取显存，效果与重计算相近但代价类型不同，二者可按层组合使用。 [来源7](https://github.com/mindspore-ai/docs/blob/a406bad67b93856c2cc9e8ebd71bf9f4fbc04e0f/docs/mindformers/docs/source_zh_cn/feature/memory_optimization.md) 在推理侧，KV 缓存分页管理可将碎片与预留浪费从 60%–80% 压低到约 4% 以下；张量并行等切分方式能显著降低单卡显存，但会引入通信开销，切分粒度过高时可能出现约 1ms 的时延劣化。 [来源2](https://github.com/yeasy/llm_internals/releases/download/preview-pdf/llm_internals.pdf) [来源3](https://www.wlwxb.com.cn/rc-pub/front/front-article/download/151523800/lowqualitypdf/%e8%be%b9%e7%bc%98%e5%a4%a7%e8%af%ad%e8%a8%80%e6%a8%a1%e5%9e%8b%e5%88%86%e5%b8%83%e5%bc%8f%e5%b9%b6%e8%a1%8c%e6%8e%a8%e7%90%86%ef%bc%9a%e6%8a%80%e6%9c%af%e5%ba%94%e7%94%a8%e4%b8%8e%e6%8c%91%e6%88%98.pdf) [来源6](https://www.c-s-a.org.cn/csa/article/pdf/10255)
-
-
-### 怎么选择控制开源大模型内部激活和注意力头的开放协议？
-
-具体可从三点核查：一是协议是否独立于服务进程生命周期与底层 ABI 绑定，只负责消息、回复、激活与状态头的线格式编码；二是激活载荷是否采用带版本的多部分目录等可演进结构，因为激活数据在传输路径中占主导；三是所选权重是否允许在推理运行时支持时取得生成前的 logits、各层隐藏状态与注意力权重，并对特定层或注意力头做干预。 [来源6](https://azabu.io/insights/hugging-face-oss-llm/) [来源8](https://github.com/mesh-llm/mesh-llm/blob/1ea1ecf754533a6a4fcc0eff8d3f33ff5b73762f/skippy/crates/skippy-protocol/README.md) 此外，开放权重只表示参数文件可获取，不自动代表训练代码、完整配方与数据公开，也不等于训练过程可复现，评估协议时应把这一边界纳入取舍。 [来源4](https://github.com/chenxuan520/deeplearning/releases/latest/download/from-neuron-to-large-models.pdf)
-
-- 可访问的模型内部对象: 残差流、注意力头、单层、最终 logits ([来源](https://rscot.learningfind.com/blog/lmcp-vs-mcp.html), 2026-11-06)
-
-### 不同框架的 hook 机制兼容性差，怎么选型才不会锁死？
-
-可审计的安装流程通常包括枚举当前 ELF、解析动态符号表与重定位表、同时校验符号名与重定位类型及当前槽值，再按页大小计算 `mprotect()` 区间并用对齐的原子指针写更新槽。 [来源1](https://raw.githubusercontent.com/Gracker/android-internals-wiki/refs/heads/master/src/part5-app/ch20-stability/12-native-hook-technology-selection-implementation.md) 重定位类型需要区分，例如 arm64 上常见函数导入涉及 `R_AARCH64_JUMP_SLOT`，部分地址引用还可能落在 `R_AARCH64_GLOB_DAT` 或 `R_AARCH64_ABS64`，同名字符串只提供候选符号。 [来源1](https://raw.githubusercontent.com/Gracker/android-internals-wiki/refs/heads/master/src/part5-app/ch20-stability/12-native-hook-technology-selection-implementation.md) 代理函数必须与被替换目标使用完全兼容的调用约定，需核对寄存器使用、隐藏结果指针、可变参数、栈对齐以及 PAC/BTI/CFI 等编译选项。 [来源3](https://raw.githubusercontent.com/Gracker/android-internals-wiki/refs/heads/master/src/part5-app/ch20-stability/12-native-hook-technology-selection-implementation.md) 因此选型时优先选择提供统一入口、且后端能力边界有文档说明的方案，并接受“不同后端能力不完全相同”这一前提，避免把单一框架的内部细节写进业务代码。 [来源7](https://github.com/lingqiqi5211/ezhooktool/blob/b3c45c40211ef1d172ffa3a3355a1c1050ea267b/README.md)
+以分页式 KV 缓存管理为例，可将既有系统中 60–80% 的碎片化和预留浪费压低到最后一个块内的少量空洞，实践中 KV 缓存浪费低于约 4%。 [来源1](https://github.com/yeasy/llm_internals/releases/download/preview-pdf/llm_internals.pdf) 前缀缓存能在共享前缀越长、并发越高时节省越多 KV 缓存显存，但收益随负载特征变化。 [来源1](https://github.com/yeasy/llm_internals/releases/download/preview-pdf/llm_internals.pdf) 张量并行切分可显著减少单卡显存占用，但切分粒度过高会因附加通信与调度开销导致每输出词元时间出现约 1 ms 的轻微劣化。 [来源5](https://www.c-s-a.org.cn/csa/article/pdf/10255)
 
 
 ### 控制大模型内部激活的开放协议有哪些？
 
-可确认的是，有一类版本化协议类型负责分阶段执行中的消息、回复、激活与状态头编码，并保持与服务进程生命周期及底层 ABI 绑定相互独立。 [来源1](https://github.com/mesh-llm/mesh-llm/blob/1ea1ecf754533a6a4fcc0eff8d3f33ff5b73762f/skippy/crates/skippy-protocol/README.md) 在取舍上，若允许对前向传播中的激活施加任意函数修改，会明显降低效率与批处理能力，因为服务端需阻塞推理等待外部计算并回传结果。 [来源7](https://www.alignmentforum.org/posts/r68nCQK3veQtCdqGt?commentId=yctfaDS8iXrJjFLd3) 此外，增加此类方法会提升复杂度，方法增多后可能以难以预期的方式相互作用，从而影响既有的安全属性。 [来源7](https://www.alignmentforum.org/posts/r68nCQK3veQtCdqGt?commentId=yctfaDS8iXrJjFLd3)
+现有材料更多是围绕内部激活的读取、导出与干预方法，而非成体系的开放协议。 [来源1](https://www.shaqiu.cn/tracking/product%3Abaseten-project-beacon-announcement) [来源2](https://dl.acm.org/doi/full/10.1145/3846173?expand=all&af=R&sortBy=recency&mi=1i9r9k2&content=standard&ConceptID=478&target=topic) [来源3](https://github.com/chrishayuk/larql/blob/3b5dd3d2893feec92dd7f99b8dc0f4f8718d3084/docs/lql-analysis-design.md) 有方案在生成过程中并行读取内部激活与文本监控，两者分歧时再调用更强模型判断，并由客户策略决定审批、拒绝、回退或记录事件。 [来源1](https://www.shaqiu.cn/tracking/product%3Abaseten-project-beacon-announcement) 相关综述指出，这类表征控制干预在多种问题上成本低于完整重训练，但缺乏可复现、可迁移的评测方法，且未在更大模型规模上验证，扩展有效性仍不确定。 [来源2](https://dl.acm.org/doi/full/10.1145/3846173?expand=all&af=R&sortBy=recency&mi=1i9r9k2&content=standard&ConceptID=478&target=topic) 另有实现将激活、残差与 logits 的导出限定在特定执行层，由外部脚本分析导出的激活，但不执行完整前向计算。 [来源3](https://github.com/chrishayuk/larql/blob/3b5dd3d2893feec92dd7f99b8dc0f4f8718d3084/docs/lql-analysis-design.md)
 
 
 ### 如何选择能控制开源大模型内部激活状态的开放协议和运行时？
 
-协议层可只负责版本化的消息、回复、激活与状态头编码，并保持与服务器进程生命周期及底层 ABI 绑定解耦，从而让控制面与传输面各自演进。 [来源1](https://github.com/mesh-llm/mesh-llm/blob/1ea1ecf754533a6a4fcc0eff8d3f33ff5b73762f/skippy/crates/skippy-protocol/README.md) 运行时层若允许在推理过程中对激活施加任意函数，会显著降低效率与批处理能力，因为服务端需阻塞推理等待外部计算并回传结果。 [来源4](https://www.alignmentforum.org/posts/r68nCQK3veQtCdqGt?commentId=yctfaDS8iXrJjFLd3) 因此选型时应优先确认协议是否版本化且与运行时解耦，并评估激活干预带来的阻塞与批处理代价。 [来源1](https://github.com/mesh-llm/mesh-llm/blob/1ea1ecf754533a6a4fcc0eff8d3f33ff5b73762f/skippy/crates/skippy-protocol/README.md) [来源4](https://www.alignmentforum.org/posts/r68nCQK3veQtCdqGt?commentId=yctfaDS8iXrJjFLd3)
+目前没有单一开放协议能同时覆盖开源大模型的内部激活读取与运行时控制，选型需在可读性、效率与安全开销之间做取舍。 [来源2](https://blog.redhub.ai/inspect-ai-models/) [来源4](https://www.alignmentforum.org/posts/r68nCQK3veQtCdqGt?commentId=yctfaDS8iXrJjFLd3) 开放权重模型允许在每次前向传播中读取激活值，并可据此训练小型检测器，这是托管 API 无法提供的能力。 [来源2](https://blog.redhub.ai/inspect-ai-models/) 但若允许用户在推理过程中对激活施加任意修改，服务端需阻塞推理等待外部计算返回，会明显降低效率与批处理能力，并可能引入多种安全属性相互干扰的复杂性。 [来源4](https://www.alignmentforum.org/posts/r68nCQK3veQtCdqGt?commentId=yctfaDS8iXrJjFLd3) 因此选型时应先明确是否需要白盒读取、可接受的延迟与开销上限，再对照各方案公开的安全等级与开销指标逐项核查。 [来源3](https://ar5iv.labs.arxiv.org/html/2411.03887) [来源6](https://openreview.net/pdf?id=ysfMTzlN49)
 
 
-### 能直接干预注意力头和残差流的运行时是什么？
+### 怎么在不修改模型权重的情况下实时干预注意力头和层的输出？
 
-可以直接干预注意力头和残差流的运行时，通常是在前向传播过程中通过命名钩子点拦截、缓存、修改或替换中间激活，而不改动模型代码。 [来源4](https://github.com/transformerlensorg/transformerlens/blob/284e35b4ee2deea0924894c221a3be8ad519474d/docs/source/content/hook_system.md) 残差流本身由各注意力头与多层感知机模块的输出逐层相加构成，因此对单个位置的写入会参与后续计算并影响最终词表分布。 [来源3](http://www.cs.toronto.edu/~niu/teaching/csc485/a2_tut2.pdf) [来源5](https://hub.baai.ac.cn/view/58627) 在生成阶段持续施加固定方向的干预，可能随解码步数累积而出现连贯性下降，需要在强度与稳定性之间取舍。 [来源7](https://arxiv.org/html/2605.10664v3)
+在不修改模型权重的前提下，实时干预注意力头和层输出的可行做法是在前向传播的固定位置挂接回调，对激活值做原地修改。 [来源2](https://github.com/chrishayuk/larql/blob/3b5dd3d2893feec92dd7f99b8dc0f4f8718d3084/docs/mech-interp.md) [来源6](https://docs.rs/oxinfer/latest/oxinfer/intervene/index.html) 具体而言，可在残差流进入某一层、注意力权重计算后、注意力输出加回残差后等位置设置干预点，其中部分回调接收可变引用，从而支持原地改写。 [来源2](https://github.com/chrishayuk/larql/blob/3b5dd3d2893feec92dd7f99b8dc0f4f8718d3084/docs/mech-interp.md) [来源6](https://docs.rs/oxinfer/latest/oxinfer/intervene/index.html) 干预手段包括消融、加性引导向量、方向投影剔除、稀疏自编码器特征引导，以及从两组提示的均值差构建引导向量。 [来源6](https://docs.rs/oxinfer/latest/oxinfer/intervene/index.html) 若采用引导向量，可在指定层向残差流加上或减去按比例缩放的向量，从而把模型推向或推离某种行为。 [来源1](https://huggingface.co/spaces/sub314xxl/obliteratus/blob/1f1442a03167175069161842e02ca9bea0b26061/obliteratus/analysis/steering_vectors.py) [来源6](https://docs.rs/oxinfer/latest/oxinfer/intervene/index.html)
 
-- 可访问的模型内部对象: 残差流、注意力头、单层、最终 logits ([来源](https://rscot.learningfind.com/blog/lmcp-vs-mcp.html), 2026-11-06)
+
+### 干预 logits 和干预激活，两种方式分别适合什么场景？
+
+这类方法通常要求对内部层有较深访问权限，且激活修补类技术依赖对层与位置的扫描来评估效果。 [来源6](https://zread.ai/decoderesearch/circuit-tracer/17-feature-interventions) 相比之下，基于 logits 的干预可在推理时直接调整解码分布，无需训练，适合风格改写、正式度调整与毒性缓解等对输出特性做细粒度控制的场景。 [来源5](https://www.scilit.com/publications/78f493ba6dbe984c4bae5f3b6869014e) [来源7](https://raw.githubusercontent.com/elder-plinius/OBLITERATUS/f67f13ca57c82cd44aec4b16f4d0d51b03eb49ac/docs/mechanistic_interpretability_research.md)
+
+
+### 开源大模型的 logits 和层路由可以被外部协议控制吗？
+
+已有方法通过请求级参数裁剪，在转发前按路由限制 max_tokens、n 等昂贵参数，并阻止 logprobs、top_logprobs 等暴露 token 分布的参数。 [来源6](https://vllm-sr.ai/zh-hans/docs/tutorials/plugin/request-params/) 在模型内部，可通过捕获指定层的残差与全词表 logits 供外部分析，且要求捕获的 logits 与推理结果在对应位置逐位一致。 [来源2](https://github.com/chrishayuk/larql/blob/3b5dd3d2893feec92dd7f99b8dc0f4f8718d3084/docs/lql-analysis-design.md) 层路由方面，有设计以指数移动平均跟踪候选路由的 lift，并要求至少 100 次观测且 lift 超过现任路由才移交控制权，比较每步重算、落后即交回。 [来源8](https://zenodo.org/records/23687991/files/Sencelium_paper.pdf?download=1) 另有研究用 logit lens 观察拒答 token 概率随层出现的时间，并指出该模式只是描述性证据，本身不确立因果依赖。 [来源5](https://arxiv.org/html/2604.04385v6) 因此外部协议更多是约束、观测与条件性切换，而非直接改写模型内部计算。 [来源2](https://github.com/chrishayuk/larql/blob/3b5dd3d2893feec92dd7f99b8dc0f4f8718d3084/docs/lql-analysis-design.md) [来源6](https://vllm-sr.ai/zh-hans/docs/tutorials/plugin/request-params/) [来源8](https://zenodo.org/records/23687991/files/Sencelium_paper.pdf?download=1)
+
 
 ### 模型层激活编辑器
 
